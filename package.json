@@ -1,0 +1,26 @@
+{
+  "name": "@mhersztowski/scene3d",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "build:core": "pnpm --filter @mhersztowski/scene3d-core run build",
+    "build:ui-core": "pnpm --filter @mhersztowski/scene3d-ui-core run build",
+    "build:ui-components": "pnpm --filter @mhersztowski/scene3d-ui-components run build",
+    "dev": "pnpm --filter demo-app run dev",
+    "clean": "pnpm -r exec rm -rf dist",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}
