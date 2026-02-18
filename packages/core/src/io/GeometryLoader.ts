@@ -1,5 +1,6 @@
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import * as THREE from 'three';
 import type { BufferGeometryData } from '../nodes/MeshNode';
 
@@ -61,6 +62,17 @@ export function parseOBJText(text: string): BufferGeometryData {
     normals: hasNormals && allNormals.length > 0 ? allNormals : undefined,
     indices: allIndices.length > 0 ? allIndices : undefined,
   };
+}
+
+export function parseSTLBuffer(buffer: ArrayBuffer): BufferGeometryData {
+  const loader = new STLLoader();
+  const geometry = loader.parse(buffer);
+
+  if (!geometry.getAttribute('position')) {
+    throw new Error('No geometry found in STL file');
+  }
+
+  return extractBufferData(geometry);
 }
 
 export function parseGLTFBuffer(buffer: ArrayBuffer): Promise<BufferGeometryData> {

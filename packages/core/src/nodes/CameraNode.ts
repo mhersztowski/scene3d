@@ -20,6 +20,37 @@ export class CameraNode extends SceneNode {
     this.far = data?.far ?? 1000;
   }
 
+  setFov(fov: number): void {
+    this.fov = fov;
+    this.notifyChange();
+  }
+
+  setNear(near: number): void {
+    this.near = near;
+    this.notifyChange();
+  }
+
+  setFar(far: number): void {
+    this.far = far;
+    this.notifyChange();
+  }
+
+  override setProperty(property: string, value: unknown): boolean {
+    switch (property) {
+      case 'camera.fov':
+        this.setFov(value as number);
+        return true;
+      case 'camera.near':
+        this.setNear(value as number);
+        return true;
+      case 'camera.far':
+        this.setFar(value as number);
+        return true;
+      default:
+        return super.setProperty(property, value);
+    }
+  }
+
   override toData(): CameraNodeData {
     return {
       ...super.toData(),

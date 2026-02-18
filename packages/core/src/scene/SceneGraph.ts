@@ -15,9 +15,23 @@ export interface SceneGraphData {
 
 export class SceneGraph {
   root: SceneNode;
+  onChange: (() => void) | null = null;
+
+  private _notifyScheduled = false;
+
+  private _handleChange = (): void => {
+    if (!this._notifyScheduled) {
+      this._notifyScheduled = true;
+      queueMicrotask(() => {
+        this._notifyScheduled = false;
+        this.onChange?.();
+      });
+    }
+  };
 
   constructor() {
     this.root = new SceneNode({ type: 'group', name: 'Scene' });
+    this.root._onChange = this._handleChange;
   }
 
   addNode(node: SceneNode, parentId?: string): void {
@@ -141,6 +155,7 @@ export class SceneGraph {
     }
 
     graph.root = buildNode(data.root);
+    graph.root.traverse((n) => { n._onChange = graph._handleChange; });
     return graph;
   }
 }

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { SimpleEditorProps, SelectedNodeData } from '@mhersztowski/scene3d-ui-core';
 import { SimpleViewer, SceneGraph, MeshNode, LightNode } from '@mhersztowski/scene3d-core';
 import Box from '@mui/material/Box';
@@ -33,40 +33,34 @@ export function SimpleEditor({ className, style }: SimpleEditorProps) {
 
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
+  useEffect(() => {
+    sceneGraph.onChange = bump;
+    return () => { sceneGraph.onChange = null; };
+  }, [sceneGraph, bump]);
+
   const addBox = useCallback(() => {
     const node = new MeshNode({ name: 'Box', geometry: { type: 'box' }, material: { color: '#4fc3f7', opacity: 1, wireframe: false } });
     sceneGraph.addNode(node);
     setSelectedNodeId(node.id);
-    bump();
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   const addSphere = useCallback(() => {
     const node = new MeshNode({ name: 'Sphere', geometry: { type: 'sphere' }, material: { color: '#81c784', opacity: 1, wireframe: false } });
     sceneGraph.addNode(node);
     setSelectedNodeId(node.id);
-    bump();
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   const deleteSelected = useCallback(() => {
     if (!selectedNodeId) return;
     sceneGraph.removeNode(selectedNodeId);
     setSelectedNodeId(null);
-    bump();
-  }, [sceneGraph, selectedNodeId, bump]);
+  }, [sceneGraph, selectedNodeId]);
 
   const handlePropertyChange = useCallback((nodeId: string, property: string, value: unknown) => {
     const node = sceneGraph.findNode(nodeId);
     if (!node) return;
-    switch (property) {
-      case 'position': node.position = value as [number, number, number]; break;
-      case 'rotation': node.rotation = value as [number, number, number]; break;
-      case 'scale': node.scale = value as [number, number, number]; break;
-      case 'material.color': if (node.type === 'mesh') (node as unknown as MeshNode).material.color = value as string; break;
-      case 'material.opacity': if (node.type === 'mesh') (node as unknown as MeshNode).material.opacity = value as number; break;
-      case 'material.wireframe': if (node.type === 'mesh') (node as unknown as MeshNode).material.wireframe = value as boolean; break;
-    }
-    bump();
-  }, [sceneGraph, bump]);
+    node.setProperty(property, value);
+  }, [sceneGraph]);
 
   const selectedNodeData: SelectedNodeData | null = useMemo(() => {
     if (!selectedNodeId) return null;

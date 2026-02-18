@@ -6,7 +6,9 @@ import type { SceneGraph } from '../scene/SceneGraph';
 import type { SceneNode } from '../scene/SceneNode';
 import type { MeshNode, BufferGeometryData } from '../nodes/MeshNode';
 import type { LightNode } from '../nodes/LightNode';
-import type { CSSProperties, ReactElement } from 'react';
+import type { CSSProperties, ReactElement, RefObject } from 'react';
+import type { CameraPresetName } from '@mhersztowski/scene3d-ui-core';
+import { CAMERA_PRESETS } from './cameraPresets';
 
 export interface SimpleViewerProps {
   sceneGraph?: SceneGraph;
@@ -14,8 +16,8 @@ export interface SimpleViewerProps {
   showGrid?: boolean;
   selectedNodeId?: string | null;
   transformMode?: 'translate' | 'rotate' | 'scale';
+  cameraPreset?: CameraPresetName;
   onNodeSelect?: (nodeId: string | null) => void;
-  onTransformChange?: (nodeId: string, property: string, value: [number, number, number]) => void;
   width?: number | string;
   height?: number | string;
   backgroundColor?: string;
@@ -34,8 +36,16 @@ function SelectableMesh({
   isSelected: boolean;
   onSelect?: (nodeId: string) => void;
 }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useEffect(() => {
+    node._threeObject = meshRef.current;
+    return () => { node._threeObject = null; };
+  }, [node]);
+
   return (
     <mesh
+      ref={meshRef}
       name={node.id}
       position={node.position}
       rotation={node.rotation}
@@ -62,12 +72,10 @@ function GizmoControls({
   sceneGraph,
   selectedNodeId,
   transformMode,
-  onTransformChange,
 }: {
   sceneGraph: SceneGraph;
   selectedNodeId: string;
   transformMode: 'translate' | 'rotate' | 'scale';
-  onTransformChange?: (nodeId: string, property: string, value: [number, number, number]) => void;
 }) {
   const { scene } = useThree();
   const controlsRef = useRef<any>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -77,22 +85,18 @@ function GizmoControls({
   }, [scene, selectedNodeId]);
 
   const handleDragEnd = useCallback(() => {
-    if (!targetObject || !onTransformChange) return;
+    if (!targetObject) return;
     const node = sceneGraph.findNode(selectedNodeId);
     if (!node) return;
 
-    const pos = targetObject.position.toArray() as [number, number, number];
-    const rot: [number, number, number] = [targetObject.rotation.x, targetObject.rotation.y, targetObject.rotation.z];
-    const scl = targetObject.scale.toArray() as [number, number, number];
-
     if (transformMode === 'translate') {
-      onTransformChange(selectedNodeId, 'position', pos);
+      node.setPosition(targetObject.position.toArray() as [number, number, number]);
     } else if (transformMode === 'rotate') {
-      onTransformChange(selectedNodeId, 'rotation', rot);
+      node.setRotation([targetObject.rotation.x, targetObject.rotation.y, targetObject.rotation.z]);
     } else if (transformMode === 'scale') {
-      onTransformChange(selectedNodeId, 'scale', scl);
+      node.setScale(targetObject.scale.toArray() as [number, number, number]);
     }
-  }, [targetObject, onTransformChange, sceneGraph, selectedNodeId, transformMode]);
+  }, [targetObject, sceneGraph, selectedNodeId, transformMode]);
 
   useEffect(() => {
     const controls = controlsRef.current;
@@ -112,6 +116,51 @@ function GizmoControls({
       size={0.7}
     />
   );
+}
+
+function SceneLight({
+  node,
+  lightNode,
+}: {
+  node: SceneNode;
+  lightNode: LightNode;
+}) {
+  const ref = useRef<THREE.Light>(null);
+
+  useEffect(() => {
+    node._threeObject = ref.current;
+    return () => { node._threeObject = null; };
+  }, [node]);
+
+  switch (lightNode.lightType) {
+    case 'ambient':
+      return (
+        <ambientLight
+          ref={ref as RefObject<THREE.AmbientLight>}
+          color={lightNode.color}
+          intensity={lightNode.intensity}
+        />
+      );
+    case 'point':
+      return (
+        <pointLight
+          ref={ref as RefObject<THREE.PointLight>}
+          position={node.position}
+          color={lightNode.color}
+          intensity={lightNode.intensity}
+        />
+      );
+    case 'directional':
+    default:
+      return (
+        <directionalLight
+          ref={ref as RefObject<THREE.DirectionalLight>}
+          position={node.position}
+          color={lightNode.color}
+          intensity={lightNode.intensity}
+        />
+      );
+  }
 }
 
 function SceneRenderer({
@@ -146,37 +195,13 @@ function SceneRenderer({
         );
       } else if (node.type === 'light') {
         const lightNode = node as unknown as LightNode;
-        switch (lightNode.lightType) {
-          case 'ambient':
-            result.push(
-              <ambientLight
-                key={node.id}
-                color={lightNode.color}
-                intensity={lightNode.intensity}
-              />,
-            );
-            break;
-          case 'point':
-            result.push(
-              <pointLight
-                key={node.id}
-                position={node.position}
-                color={lightNode.color}
-                intensity={lightNode.intensity}
-              />,
-            );
-            break;
-          case 'directional':
-          default:
-            result.push(
-              <directionalLight
-                key={node.id}
-                position={node.position}
-                color={lightNode.color}
-                intensity={lightNode.intensity}
-              />,
-            );
-        }
+        result.push(
+          <SceneLight
+            key={node.id}
+            node={node}
+            lightNode={lightNode}
+          />,
+        );
       }
     });
 
@@ -266,23 +291,24 @@ function SceneContent({
   showGrid,
   selectedNodeId,
   transformMode,
+  cameraPreset = 'standard',
   onNodeSelect,
-  onTransformChange,
 }: {
   sceneGraph?: SceneGraph;
   version?: number;
   showGrid: boolean;
   selectedNodeId?: string | null;
   transformMode: 'translate' | 'rotate' | 'scale';
+  cameraPreset?: CameraPresetName;
   onNodeSelect?: (nodeId: string | null) => void;
-  onTransformChange?: (nodeId: string, property: string, value: [number, number, number]) => void;
 }) {
   const selectedNode = selectedNodeId && sceneGraph ? sceneGraph.findNode(selectedNodeId) : null;
   const showGizmo = selectedNode?.type === 'mesh';
+  const presetConfig = CAMERA_PRESETS[cameraPreset];
 
   return (
     <>
-      <OrbitControls makeDefault />
+      <OrbitControls makeDefault mouseButtons={presetConfig.mouseButtons} />
       <ambientLight intensity={0.3} />
       <directionalLight position={[10, 10, 5]} intensity={0.7} />
       {showGrid && <gridHelper args={[20, 20, '#444444', '#333333']} />}
@@ -297,7 +323,6 @@ function SceneContent({
           sceneGraph={sceneGraph}
           selectedNodeId={selectedNodeId}
           transformMode={transformMode}
-          onTransformChange={onTransformChange}
         />
       )}
     </>
@@ -310,8 +335,8 @@ export function SimpleViewer({
   showGrid = true,
   selectedNodeId,
   transformMode = 'translate',
+  cameraPreset = 'standard',
   onNodeSelect,
-  onTransformChange,
   width = '100%',
   height = '100%',
   backgroundColor = '#2a2a2a',
@@ -339,8 +364,8 @@ export function SimpleViewer({
           showGrid={showGrid}
           selectedNodeId={selectedNodeId}
           transformMode={transformMode}
+          cameraPreset={cameraPreset}
           onNodeSelect={onNodeSelect}
-          onTransformChange={onTransformChange}
         />
       </Canvas>
     </div>

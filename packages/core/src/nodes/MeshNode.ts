@@ -42,6 +42,54 @@ export class MeshNode extends SceneNode {
     };
   }
 
+  setMaterialColor(color: string): void {
+    this.material.color = color;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mat = (this._threeObject as any)?.material;
+    if (mat?.color?.set) mat.color.set(color);
+    this.notifyChange();
+  }
+
+  setMaterialOpacity(opacity: number): void {
+    this.material.opacity = opacity;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mat = (this._threeObject as any)?.material;
+    if (mat) {
+      mat.opacity = opacity;
+      mat.transparent = opacity < 1;
+    }
+    this.notifyChange();
+  }
+
+  setMaterialWireframe(wireframe: boolean): void {
+    this.material.wireframe = wireframe;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mat = (this._threeObject as any)?.material;
+    if (mat) mat.wireframe = wireframe;
+    this.notifyChange();
+  }
+
+  setGeometry(geometry: GeometryDescriptor): void {
+    this.geometry = geometry;
+    this.notifyChange();
+  }
+
+  override setProperty(property: string, value: unknown): boolean {
+    switch (property) {
+      case 'material.color':
+        this.setMaterialColor(value as string);
+        return true;
+      case 'material.opacity':
+        this.setMaterialOpacity(value as number);
+        return true;
+      case 'material.wireframe':
+        this.setMaterialWireframe(value as boolean);
+        return true;
+      default:
+        return super.setProperty(property, value);
+    }
+  }
+
   override toData(): MeshNodeData {
     return {
       ...super.toData(),

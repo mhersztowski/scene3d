@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
-import type { RichEditorProps, SceneTreeNodeData, SelectedNodeData, TransformMode, ToolbarItem } from '@mhersztowski/scene3d-ui-core';
-import { SimpleViewer, SceneGraph, SceneSerializer, SceneDeserializer, MeshNode, LightNode, GroupNode, parseOBJText, parseGLTFBuffer } from '@mhersztowski/scene3d-core';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import type { RichEditorProps, SceneTreeNodeData, SelectedNodeData, TransformMode, ToolbarItem, CameraPresetName } from '@mhersztowski/scene3d-ui-core';
+import { useDialog } from '@mhersztowski/scene3d-ui-core';
+import { SimpleViewer, SceneGraph, SceneSerializer, SceneDeserializer, MeshNode, LightNode, GroupNode, parseOBJText, parseSTLBuffer, parseGLTFBuffer, GLTFExporter, OBJExporter, STLExporter, CAMERA_PRESETS } from '@mhersztowski/scene3d-core';
 import type { SceneNode, LightType, BufferGeometryData } from '@mhersztowski/scene3d-core';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -11,9 +12,16 @@ import ListItemText from '@mui/material/ListItemText';
 import Typography from '@mui/material/Typography';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import SaveAsIcon from '@mui/icons-material/SaveAs';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import SettingsIcon from '@mui/icons-material/Settings';
+import Divider from '@mui/material/Divider';
+import Radio from '@mui/material/Radio';
+import RadioGroup from '@mui/material/RadioGroup';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import { Allotment } from 'allotment';
 import { Toolbar } from '../../toolbar';
 import { SceneTreePanel, PropertiesPanel } from '../../panels';
+import { Dialog } from '../../components';
 import {
   MoveIcon,
   RotateIcon,
@@ -95,6 +103,10 @@ export function RichEditor({ className, style }: RichEditorProps) {
   const importParentIdRef = useRef<string | undefined>(undefined);
   const [canPaste, setCanPaste] = useState(false);
   const [fileMenuAnchor, setFileMenuAnchor] = useState<HTMLElement | null>(null);
+  const [cameraPreset, setCameraPreset] = useState<CameraPresetName>(() =>
+    (localStorage.getItem('scene3d-camera-preset') as CameraPresetName) || 'standard',
+  );
+  const settingsDialog = useDialog();
 
   const [sceneGraph, setSceneGraph] = useState(() => {
     const graph = new SceneGraph();
@@ -137,6 +149,11 @@ export function RichEditor({ className, style }: RichEditorProps) {
 
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
+  useEffect(() => {
+    sceneGraph.onChange = bump;
+    return () => { sceneGraph.onChange = null; };
+  }, [sceneGraph, bump]);
+
   // ─── Add operations ─────────────────────────────────────────
 
   const addMesh = useCallback((type: 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'torus', parentId?: string) => {
@@ -149,8 +166,7 @@ export function RichEditor({ className, style }: RichEditorProps) {
     });
     sceneGraph.addNode(node, parentId);
     setSelectedNodeId(node.id);
-    bump();
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   const addLight = useCallback((lightType: 'point' | 'directional', parentId?: string) => {
     const name = lightType === 'point' ? 'Point Light' : 'Directional Light';
@@ -162,15 +178,13 @@ export function RichEditor({ className, style }: RichEditorProps) {
     });
     sceneGraph.addNode(node, parentId);
     setSelectedNodeId(node.id);
-    bump();
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   const addGroup = useCallback((parentId?: string) => {
     const node = new GroupNode({ name: 'Group' });
     sceneGraph.addNode(node, parentId);
     setSelectedNodeId(node.id);
-    bump();
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   const handleNodeAdd = useCallback((type: string, parentId?: string) => {
     if (type === 'point-light') {
@@ -189,8 +203,7 @@ export function RichEditor({ className, style }: RichEditorProps) {
   const deleteNode = useCallback((nodeId: string) => {
     sceneGraph.removeNode(nodeId);
     if (selectedNodeId === nodeId) setSelectedNodeId(null);
-    bump();
-  }, [sceneGraph, selectedNodeId, bump]);
+  }, [sceneGraph, selectedNodeId]);
 
   const handleDuplicate = useCallback((nodeId: string) => {
     const node = sceneGraph.findNode(nodeId);
@@ -223,8 +236,7 @@ export function RichEditor({ className, style }: RichEditorProps) {
     const parentId = node.parent && node.parent !== sceneGraph.root ? node.parent.id : undefined;
     sceneGraph.addNode(clone, parentId);
     setSelectedNodeId(clone.id);
-    bump();
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   // ─── Clipboard operations ───────────────────────────────────
 
@@ -325,65 +337,22 @@ export function RichEditor({ className, style }: RichEditorProps) {
       setCanPaste(false);
     }
 
-    bump();
-  }, [sceneGraph, selectedNodeId, bump]);
+  }, [sceneGraph, selectedNodeId]);
 
   // ─── Visibility & property changes ──────────────────────────
 
   const handleVisibilityToggle = useCallback((nodeId: string) => {
     const node = sceneGraph.findNode(nodeId);
     if (node) {
-      node.visible = !node.visible;
-      bump();
+      node.setVisible(!node.visible);
     }
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   const handlePropertyChange = useCallback((nodeId: string, property: string, value: unknown) => {
     const node = sceneGraph.findNode(nodeId);
     if (!node) return;
-
-    switch (property) {
-      case 'position':
-        node.position = value as [number, number, number];
-        break;
-      case 'rotation':
-        node.rotation = value as [number, number, number];
-        break;
-      case 'scale':
-        node.scale = value as [number, number, number];
-        break;
-      case 'material.color':
-        if (node.type === 'mesh') (node as unknown as MeshNode).material.color = value as string;
-        break;
-      case 'material.opacity':
-        if (node.type === 'mesh') (node as unknown as MeshNode).material.opacity = value as number;
-        break;
-      case 'material.wireframe':
-        if (node.type === 'mesh') (node as unknown as MeshNode).material.wireframe = value as boolean;
-        break;
-      case 'light.color':
-        if (node.type === 'light') (node as unknown as LightNode).color = value as string;
-        break;
-      case 'light.intensity':
-        if (node.type === 'light') (node as unknown as LightNode).intensity = value as number;
-        break;
-    }
-    bump();
-  }, [sceneGraph, bump]);
-
-  // ─── Gizmo transform callback ──────────────────────────────
-
-  const handleTransformChange = useCallback((nodeId: string, property: string, value: [number, number, number]) => {
-    const node = sceneGraph.findNode(nodeId);
-    if (!node) return;
-
-    switch (property) {
-      case 'position': node.position = value; break;
-      case 'rotation': node.rotation = value; break;
-      case 'scale': node.scale = value; break;
-    }
-    bump();
-  }, [sceneGraph, bump]);
+    node.setProperty(property, value);
+  }, [sceneGraph]);
 
   // ─── Viewport selection ─────────────────────────────────────
 
@@ -396,10 +365,9 @@ export function RichEditor({ className, style }: RichEditorProps) {
   const handleNodeRename = useCallback((nodeId: string, newName: string) => {
     const node = sceneGraph.findNode(nodeId);
     if (node) {
-      node.name = newName;
-      bump();
+      node.setName(newName);
     }
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   // ─── Reparent (drag & drop) ───────────────────────────────
 
@@ -423,8 +391,7 @@ export function RichEditor({ className, style }: RichEditorProps) {
     // Detach and re-attach
     node.parent.removeChild(nodeId);
     newParent.addChild(node);
-    bump();
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   // ─── Import mesh ──────────────────────────────────────────
 
@@ -444,6 +411,9 @@ export function RichEditor({ className, style }: RichEditorProps) {
       if (ext === 'obj') {
         const text = await file.text();
         bufferData = parseOBJText(text);
+      } else if (ext === 'stl') {
+        const buffer = await file.arrayBuffer();
+        bufferData = parseSTLBuffer(buffer);
       } else if (ext === 'gltf' || ext === 'glb') {
         const buffer = await file.arrayBuffer();
         bufferData = await parseGLTFBuffer(buffer);
@@ -463,10 +433,9 @@ export function RichEditor({ className, style }: RichEditorProps) {
 
     sceneGraph.addNode(node, importParentIdRef.current);
     setSelectedNodeId(node.id);
-    bump();
 
     e.target.value = '';
-  }, [sceneGraph, bump]);
+  }, [sceneGraph]);
 
   // ─── File menu operations ──────────────────────────────────
 
@@ -506,6 +475,40 @@ export function RichEditor({ className, style }: RichEditorProps) {
     e.target.value = '';
   }, []);
 
+  const downloadBlob = useCallback((blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const handleExportOBJ = useCallback(() => {
+    setFileMenuAnchor(null);
+    const text = OBJExporter.export(sceneGraph);
+    downloadBlob(new Blob([text], { type: 'text/plain' }), 'scene.obj');
+  }, [sceneGraph, downloadBlob]);
+
+  const handleExportSTL = useCallback(() => {
+    setFileMenuAnchor(null);
+    const dataView = STLExporter.export(sceneGraph);
+    downloadBlob(new Blob([dataView.buffer as ArrayBuffer], { type: 'model/stl' }), 'scene.stl');
+  }, [sceneGraph, downloadBlob]);
+
+  const handleExportGLTF = useCallback(async () => {
+    setFileMenuAnchor(null);
+    const blob = await GLTFExporter.export(sceneGraph);
+    downloadBlob(blob, 'scene.gltf');
+  }, [sceneGraph, downloadBlob]);
+
+  // ─── Camera preset ─────────────────────────────────────────
+
+  const handleCameraPresetChange = useCallback((preset: CameraPresetName) => {
+    setCameraPreset(preset);
+    localStorage.setItem('scene3d-camera-preset', preset);
+  }, []);
+
   // ─── Derived data ───────────────────────────────────────────
 
   const treeNodes = useMemo(() => {
@@ -529,6 +532,8 @@ export function RichEditor({ className, style }: RichEditorProps) {
     { id: 'scale', label: '', icon: <ScaleIcon />, onClick: () => setTransformMode('scale'), active: transformMode === 'scale', tooltip: 'Scale (R)' },
     { id: 'sep-1', label: '', type: 'separator' },
     { id: 'grid', label: '', icon: <GridIcon />, onClick: () => setShowGrid(!showGrid), active: showGrid, tooltip: 'Toggle Grid' },
+    { id: 'sep-2', label: '', type: 'separator' },
+    { id: 'settings', label: '', icon: <SettingsIcon sx={{ fontSize: 16 }} />, onClick: settingsDialog.open, tooltip: 'Settings' },
   ];
 
   return (
@@ -578,6 +583,19 @@ export function RichEditor({ className, style }: RichEditorProps) {
             <ListItemText primaryTypographyProps={{ fontSize: '0.75rem' }}>Save As</ListItemText>
             <Typography sx={{ fontSize: '0.65rem', color: 'text.disabled', ml: 3 }}>Ctrl+Shift+S</Typography>
           </MenuItem>
+          <Divider />
+          <MenuItem onClick={handleExportOBJ} sx={{ fontSize: '0.75rem', minHeight: 32, py: 0.5, '& .MuiListItemIcon-root': { minWidth: 28 } }}>
+            <ListItemIcon><FileDownloadIcon sx={{ fontSize: 16 }} /></ListItemIcon>
+            <ListItemText primaryTypographyProps={{ fontSize: '0.75rem' }}>Export as OBJ</ListItemText>
+          </MenuItem>
+          <MenuItem onClick={handleExportSTL} sx={{ fontSize: '0.75rem', minHeight: 32, py: 0.5, '& .MuiListItemIcon-root': { minWidth: 28 } }}>
+            <ListItemIcon><FileDownloadIcon sx={{ fontSize: 16 }} /></ListItemIcon>
+            <ListItemText primaryTypographyProps={{ fontSize: '0.75rem' }}>Export as STL</ListItemText>
+          </MenuItem>
+          <MenuItem onClick={handleExportGLTF} sx={{ fontSize: '0.75rem', minHeight: 32, py: 0.5, '& .MuiListItemIcon-root': { minWidth: 28 } }}>
+            <ListItemIcon><FileDownloadIcon sx={{ fontSize: 16 }} /></ListItemIcon>
+            <ListItemText primaryTypographyProps={{ fontSize: '0.75rem' }}>Export as GLTF</ListItemText>
+          </MenuItem>
         </Menu>
       </Box>
       <Toolbar items={toolbarItems} />
@@ -609,8 +627,8 @@ export function RichEditor({ className, style }: RichEditorProps) {
                 showGrid={showGrid}
                 selectedNodeId={selectedNodeId}
                 transformMode={transformMode}
+                cameraPreset={cameraPreset}
                 onNodeSelect={handleViewportSelect}
-                onTransformChange={handleTransformChange}
               />
               <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, p: '4px 10px', pointerEvents: 'none' }}>
                 <Typography sx={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -654,7 +672,7 @@ export function RichEditor({ className, style }: RichEditorProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".obj,.gltf,.glb"
+        accept=".obj,.stl,.gltf,.glb"
         style={{ display: 'none' }}
         onChange={handleFileSelected}
       />
@@ -665,6 +683,40 @@ export function RichEditor({ className, style }: RichEditorProps) {
         style={{ display: 'none' }}
         onChange={handleSceneFileSelected}
       />
+      <Dialog
+        open={settingsDialog.isOpen}
+        onClose={settingsDialog.close}
+        title="Settings"
+        maxWidth="sm"
+        actions={
+          <Button size="small" variant="contained" onClick={settingsDialog.close} sx={{ textTransform: 'none', fontSize: '0.75rem' }}>
+            Close
+          </Button>
+        }
+      >
+        <Typography sx={{ fontSize: '0.8rem', fontWeight: 500, mb: 1 }}>Camera Controls</Typography>
+        <RadioGroup
+          value={cameraPreset}
+          onChange={(e) => handleCameraPresetChange(e.target.value as CameraPresetName)}
+        >
+          {(Object.entries(CAMERA_PRESETS) as [CameraPresetName, typeof CAMERA_PRESETS[CameraPresetName]][]).map(
+            ([key, preset]) => (
+              <FormControlLabel
+                key={key}
+                value={key}
+                control={<Radio size="small" />}
+                label={
+                  <Box>
+                    <Typography sx={{ fontSize: '0.8rem' }}>{preset.label}</Typography>
+                    <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>{preset.description}</Typography>
+                  </Box>
+                }
+                sx={{ alignItems: 'flex-start', mb: 0.5, '& .MuiRadio-root': { pt: 0.25 } }}
+              />
+            ),
+          )}
+        </RadioGroup>
+      </Dialog>
     </Box>
   );
 }

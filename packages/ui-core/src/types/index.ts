@@ -220,6 +220,18 @@ export interface RichViewerProps {
 
 export type TransformMode = 'translate' | 'rotate' | 'scale';
 
+export type CameraPresetName = 'standard' | 'blender' | 'maya' | 'cad';
+
+export interface CameraPresetConfig {
+  label: string;
+  description: string;
+  mouseButtons: {
+    LEFT: number | null;
+    MIDDLE: number | null;
+    RIGHT: number | null;
+  };
+}
+
 export interface ToolbarItem {
   id: string;
   label: string;
